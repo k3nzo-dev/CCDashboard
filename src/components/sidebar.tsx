@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: "📊" },
   { href: "/sessions", label: "Sessions", icon: "💬" },
   { href: "/projects", label: "Projects", icon: "📁" },
+  { href: "/live", label: "Live View", icon: "🔴" },
 ];
 
 export function Sidebar({ refreshStatus }: { refreshStatus: "live" | "paused" }) {
