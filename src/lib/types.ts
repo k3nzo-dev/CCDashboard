@@ -71,3 +71,42 @@ export interface DateRange {
 }
 
 export const PLAN_PRICE = 100; // Max 5x monthly cost
+
+// ── Memory types ──
+export interface MemoryFileFrontmatter {
+  name: string;
+  description: string;
+  type: "user" | "feedback" | "project" | "reference";
+}
+
+export interface MemoryFile {
+  filename: string;
+  frontmatter: MemoryFileFrontmatter | null;
+  content: string;
+}
+
+export interface MemoryIndexEntry {
+  title: string;
+  file: string;
+  description: string;
+}
+
+export interface ProjectMemoryData {
+  memoryIndex: MemoryIndexEntry[];
+  memoryFiles: MemoryFile[];
+  claudeMd: string | null;
+  claudeMdPath: string | null;
+}
+
+export interface ActiveProjectInfo {
+  activeProject: string | null;
+  encodedName: string | null;
+  lastActivity: string | null;
+}
+
+export interface ProjectPickerItem {
+  name: string;
+  encodedName: string;
+  lastActive: string;
+  sessions: number;
+}

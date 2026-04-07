@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## SESSION START
 
-1. Read tasks/lessons.md — apply all lessons before touching anything
-2. Read tasks/todo.md — understand current state
+1. Read [l](http://todo.md)essons.md — apply all lessons before touching anything
+2. Read todo.md — understand current state
 3. If neither exists, create them before starting
 
 ## Project Context
@@ -24,31 +24,37 @@ Tech stack: Next.js 16 (App Router) + TypeScript + Tailwind CSS v4 + Recharts + 
 ## WORKFLOW
 
 ### 1. Plan First
+
 - Enter plan mode for any non-trivial task (3+ steps)
 - Write plan to tasks/todo.md before implementing
 - If something goes wrong, STOP and re-plan — never push through
 
 ### 2. Subagent Strategy
+
 - Use subagents to keep main context clean
 - One task per subagent
 - Throw more compute at hard problems
 
 ### 3. Self-Improvement Loop
+
 - After any correction: update tasks/lessons.md
-- Format: [date] | what went wrong | rule to prevent it
+- Format: \[date\] | what went wrong | rule to prevent it
 - Review lessons at every session start
 
 ### 4. Verification Standard
+
 - Never mark complete without proving it works
 - Run tests, check logs, diff behavior
 - Ask: "Would a staff engineer approve this?"
 
 ### 5. Demand Elegance
+
 - For non-trivial changes: is there a more elegant solution?
 - If a fix feels hacky: rebuild it properly
 - Don't over-engineer simple things
 
 ### 6. Autonomous Bug Fixing
+
 - When given a bug: just fix it
 - Go to logs, find root cause, resolve it
 - No hand-holding needed
@@ -67,19 +73,23 @@ When asked to build something, start writing code immediately. Do not invoke bra
 ## Architecture
 
 ### Data Flow
+
 1. `src/lib/claude-data.ts` — scans `~/.claude/projects/`, streams each `*.jsonl` file via `readline`, extracts session summaries with token usage, tool counts, and cost calculations
 2. `src/app/api/sessions/route.ts` — single API route serving four views via `?view=` query param: `overview`, `daily`, `projects`, `sessions` (with pagination via `limit`/`offset` and optional `project` filter). Results cached in-memory for 30s
 3. `src/components/dashboard.tsx` — client-side orchestrator that fetches all four views in parallel on mount, manages tab state (overview/sessions)
 
 ### Key Modules
+
 - `src/lib/claude-data.ts` — JSONL parser, cost calculator (multi-model pricing table), and aggregation functions (`computeOverview`, `computeDailyStats`, `computeProjectStats`)
 - `src/lib/format.ts` — display formatters for cost, tokens, duration, dates (shared between components)
 - `src/components/` — all `"use client"` components: `stats-cards`, `cost-chart`, `token-chart`, `project-table`, `session-list`, `tools-chart`
 
 ### Pricing Model
+
 Multi-model pricing defined in `PRICING` map in `claude-data.ts`. Cost is calculated per-session using the primary model's rates. To add a new model, add an entry to the `PRICING` record.
 
 ### JSONL Record Types
+
 Sessions are parsed from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. Key record types: `user` (prompts), `assistant` (model responses with `message.usage` tokens and `message.content[]` tool_use blocks), `system` (metadata).
 
 ## Agent Teams / Parallel Work
