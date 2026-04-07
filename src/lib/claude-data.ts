@@ -2,9 +2,16 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import readline from "readline";
+import type {
+  TokenUsage,
+  SessionSummary,
+  DailyStat,
+  ProjectStat,
+  BranchStat,
+  OverviewStats,
+} from "./types";
 
 // ── Pricing (per 1M tokens) ──
-// Claude Sonnet 4 pricing as default
 const PRICING: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-sonnet-4-20250514": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
@@ -30,58 +37,18 @@ function costForUsage(model: string, usage: TokenUsage): number {
   );
 }
 
-// ── Types ──
-export interface TokenUsage {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
-
-export interface SessionSummary {
-  id: string;
-  project: string;
-  projectPath: string;
-  firstTimestamp: string;
-  lastTimestamp: string;
-  durationMs: number;
-  messageCount: number;
-  userMessages: number;
-  assistantMessages: number;
-  tokens: TokenUsage;
-  cost: number;
-  models: string[];
-  tools: Record<string, number>;
-  firstPrompt: string;
-  gitBranch: string;
-}
-
-export interface DailyStat {
-  date: string; // YYYY-MM-DD
-  sessions: number;
-  tokens: TokenUsage;
-  cost: number;
-  messageCount: number;
-}
-
-export interface ProjectStat {
-  project: string;
-  projectPath: string;
-  sessions: number;
-  tokens: TokenUsage;
-  cost: number;
-  lastActive: string;
-}
-
-export interface OverviewStats {
-  totalSessions: number;
-  totalCost: number;
-  totalTokens: TokenUsage;
-  totalMessages: number;
-  avgSessionDuration: number;
-  avgCostPerSession: number;
-  topModels: { model: string; count: number }[];
-  topTools: { tool: string; count: number }[];
+export function filterByDateRange(
+  sessions: SessionSummary[],
+  from: string | null,
+  to: string | null,
+): SessionSummary[] {
+  if (!from && !to) return sessions;
+  return sessions.filter((s) => {
+    const ts = s.firstTimestamp;
+    if (from && ts < from) return false;
+    if (to && ts > to) return false;
+    return true;
+  });
 }
 
 // ── Core parsing ──
@@ -89,7 +56,6 @@ const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const PROJECTS_DIR = path.join(CLAUDE_DIR, "projects");
 
 function getProjectName(dirName: string): { name: string; fullPath: string } {
-  // Decode: -Users-lboschi-Desktop-ListingKit → /Users/lboschi/Desktop/ListingKit
   const fullPath = dirName.replace(/^-/, "/").replace(/-/g, "/");
   const parts = fullPath.split("/").filter(Boolean);
   const name = parts[parts.length - 1] || dirName;
@@ -171,8 +137,7 @@ async function parseSessionFile(filePath: string, project: string, projectPath: 
 
   if (!firstTimestamp || messageCount === 0) return null;
 
-  const durationMs =
-    new Date(lastTimestamp).getTime() - new Date(firstTimestamp).getTime();
+  const durationMs = new Date(lastTimestamp).getTime() - new Date(firstTimestamp).getTime();
   const modelList = Array.from(models);
   const primaryModel = modelList[0] || "unknown";
   const cost = costForUsage(primaryModel, tokens);
@@ -222,8 +187,7 @@ export async function getAllSessions(): Promise<SessionSummary[]> {
   }
 
   allSessions.sort(
-    (a, b) =>
-      new Date(b.firstTimestamp).getTime() - new Date(a.firstTimestamp).getTime()
+    (a, b) => new Date(b.firstTimestamp).getTime() - new Date(a.firstTimestamp).getTime()
   );
   return allSessions;
 }
@@ -233,8 +197,11 @@ export function computeOverview(sessions: SessionSummary[]): OverviewStats {
   let totalCost = 0;
   let totalMessages = 0;
   let totalDuration = 0;
-  const modelCounts: Record<string, number> = {};
+  const modelCounts: Record<string, { count: number; tokens: number }> = {};
   const toolCounts: Record<string, number> = {};
+  const projectSet = new Set<string>();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayProjects = new Set<string>();
 
   for (const s of sessions) {
     totalTokens.input += s.tokens.input;
@@ -244,8 +211,14 @@ export function computeOverview(sessions: SessionSummary[]): OverviewStats {
     totalCost += s.cost;
     totalMessages += s.messageCount;
     totalDuration += s.durationMs;
+    projectSet.add(s.project);
+    if (s.firstTimestamp.startsWith(todayStr)) todayProjects.add(s.project);
+
+    const sessionTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite;
     for (const m of s.models) {
-      modelCounts[m] = (modelCounts[m] || 0) + 1;
+      if (!modelCounts[m]) modelCounts[m] = { count: 0, tokens: 0 };
+      modelCounts[m].count++;
+      modelCounts[m].tokens += sessionTokens;
     }
     for (const [tool, count] of Object.entries(s.tools)) {
       toolCounts[tool] = (toolCounts[tool] || 0) + count;
@@ -253,9 +226,9 @@ export function computeOverview(sessions: SessionSummary[]): OverviewStats {
   }
 
   const topModels = Object.entries(modelCounts)
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => b[1].tokens - a[1].tokens)
     .slice(0, 5)
-    .map(([model, count]) => ({ model, count }));
+    .map(([model, data]) => ({ model, count: data.count, tokens: data.tokens }));
 
   const topTools = Object.entries(toolCounts)
     .sort((a, b) => b[1] - a[1])
@@ -269,6 +242,8 @@ export function computeOverview(sessions: SessionSummary[]): OverviewStats {
     totalMessages,
     avgSessionDuration: sessions.length ? totalDuration / sessions.length : 0,
     avgCostPerSession: sessions.length ? totalCost / sessions.length : 0,
+    activeProjects: projectSet.size,
+    activeToday: todayProjects.size,
     topModels,
     topTools,
   };
@@ -302,7 +277,17 @@ export function computeDailyStats(sessions: SessionSummary[]): DailyStat[] {
 }
 
 export function computeProjectStats(sessions: SessionSummary[]): ProjectStat[] {
-  const byProject: Record<string, ProjectStat> = {};
+  const byProject: Record<string, {
+    project: string;
+    projectPath: string;
+    sessions: number;
+    tokens: TokenUsage;
+    cost: number;
+    lastActive: string;
+    totalDurationMs: number;
+    modelCounts: Record<string, number>;
+    branches: Record<string, { sessions: number; tokens: TokenUsage; cost: number }>;
+  }> = {};
 
   for (const s of sessions) {
     if (!byProject[s.project]) {
@@ -313,6 +298,9 @@ export function computeProjectStats(sessions: SessionSummary[]): ProjectStat[] {
         tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         cost: 0,
         lastActive: s.firstTimestamp,
+        totalDurationMs: 0,
+        modelCounts: {},
+        branches: {},
       };
     }
     const p = byProject[s.project];
@@ -322,8 +310,43 @@ export function computeProjectStats(sessions: SessionSummary[]): ProjectStat[] {
     p.tokens.cacheRead += s.tokens.cacheRead;
     p.tokens.cacheWrite += s.tokens.cacheWrite;
     p.cost += s.cost;
+    p.totalDurationMs += s.durationMs;
     if (s.firstTimestamp > p.lastActive) p.lastActive = s.firstTimestamp;
+
+    for (const m of s.models) {
+      p.modelCounts[m] = (p.modelCounts[m] || 0) + 1;
+    }
+
+    const branch = s.gitBranch || "unknown";
+    if (!p.branches[branch]) {
+      p.branches[branch] = { sessions: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 };
+    }
+    const b = p.branches[branch];
+    b.sessions++;
+    b.tokens.input += s.tokens.input;
+    b.tokens.output += s.tokens.output;
+    b.tokens.cacheRead += s.tokens.cacheRead;
+    b.tokens.cacheWrite += s.tokens.cacheWrite;
+    b.cost += s.cost;
   }
 
-  return Object.values(byProject).sort((a, b) => b.cost - a.cost);
+  return Object.values(byProject)
+    .map((p) => {
+      const primaryModel = Object.entries(p.modelCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "unknown";
+      const branches: BranchStat[] = Object.entries(p.branches)
+        .map(([branch, data]) => ({ branch, ...data }))
+        .sort((a, b) => b.cost - a.cost);
+      return {
+        project: p.project,
+        projectPath: p.projectPath,
+        sessions: p.sessions,
+        tokens: p.tokens,
+        cost: p.cost,
+        lastActive: p.lastActive,
+        branches,
+        totalDurationMs: p.totalDurationMs,
+        primaryModel: primaryModel.replace("claude-", "").split("-2")[0],
+      };
+    })
+    .sort((a, b) => b.cost - a.cost);
 }
